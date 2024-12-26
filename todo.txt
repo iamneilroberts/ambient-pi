@@ -1,0 +1,20 @@
+to-do:
+cloud photo
+photo rotation
+space component
+marine component? 
+ADSB component 
+
+
+install full package on orangepi
+-need systemonitor service? 
+-need photo service? 
+-proxy service for yahoo finance?
+
+script to find open ports and config
+script to start all servers needed
+fancier stock symbol lookup
+
+npm install express cors node-fetch add to package dependencies
+npm install yahoo-stock-api axios
+
