@@ -1,7 +1,43 @@
-# .gitignore
-
-# node_modules
+# Dependencies
 node_modules
+package-lock.json
+backend/package-lock.json
 
-#backup files
+# Logs and caches
+logs/
+backend/logs/
+*.log
+backend/photo-cache/
+
+# Environment and backup files
+.env
+backend/.env
 *.js~
+*.txt~
+*.css~
+
+# Documentation and text files
+src/components/weather/textfiles/
+*.txt
+ProjectTree.txt
+
+# Local media files
+backend/local-photos/
+public/sounds/
+
+# Test and temporary files
+*Test.js
+*_working*.js
+*old*.js
+working*.txt
+
+# Build artifacts
+build/
+dist/
+coverage/
+
+# IDE and system files
+.DS_Store
+.vscode/
+*.swp
+*.swo

@@ -1,0 +1,101 @@
+/* Aircraft icon rotations */
+.leaflet-marker-icon {
+  transition: transform 0.3s ease-in-out;
+  transform-origin: center;
+}
+
+/* Generate rotation classes for every 5 degrees */
+.rotate-0 { transform: rotate(0deg); }
+.rotate-5 { transform: rotate(5deg); }
+.rotate-10 { transform: rotate(10deg); }
+.rotate-15 { transform: rotate(15deg); }
+.rotate-20 { transform: rotate(20deg); }
+.rotate-25 { transform: rotate(25deg); }
+.rotate-30 { transform: rotate(30deg); }
+.rotate-35 { transform: rotate(35deg); }
+.rotate-40 { transform: rotate(40deg); }
+.rotate-45 { transform: rotate(45deg); }
+.rotate-50 { transform: rotate(50deg); }
+.rotate-55 { transform: rotate(55deg); }
+.rotate-60 { transform: rotate(60deg); }
+.rotate-65 { transform: rotate(65deg); }
+.rotate-70 { transform: rotate(70deg); }
+.rotate-75 { transform: rotate(75deg); }
+.rotate-80 { transform: rotate(80deg); }
+.rotate-85 { transform: rotate(85deg); }
+.rotate-90 { transform: rotate(90deg); }
+.rotate-95 { transform: rotate(95deg); }
+.rotate-100 { transform: rotate(100deg); }
+.rotate-105 { transform: rotate(105deg); }
+.rotate-110 { transform: rotate(110deg); }
+.rotate-115 { transform: rotate(115deg); }
+.rotate-120 { transform: rotate(120deg); }
+.rotate-125 { transform: rotate(125deg); }
+.rotate-130 { transform: rotate(130deg); }
+.rotate-135 { transform: rotate(135deg); }
+.rotate-140 { transform: rotate(140deg); }
+.rotate-145 { transform: rotate(145deg); }
+.rotate-150 { transform: rotate(150deg); }
+.rotate-155 { transform: rotate(155deg); }
+.rotate-160 { transform: rotate(160deg); }
+.rotate-165 { transform: rotate(165deg); }
+.rotate-170 { transform: rotate(170deg); }
+.rotate-175 { transform: rotate(175deg); }
+.rotate-180 { transform: rotate(180deg); }
+.rotate-185 { transform: rotate(185deg); }
+.rotate-190 { transform: rotate(190deg); }
+.rotate-195 { transform: rotate(195deg); }
+.rotate-200 { transform: rotate(200deg); }
+.rotate-205 { transform: rotate(205deg); }
+.rotate-210 { transform: rotate(210deg); }
+.rotate-215 { transform: rotate(215deg); }
+.rotate-220 { transform: rotate(220deg); }
+.rotate-225 { transform: rotate(225deg); }
+.rotate-230 { transform: rotate(230deg); }
+.rotate-235 { transform: rotate(235deg); }
+.rotate-240 { transform: rotate(240deg); }
+.rotate-245 { transform: rotate(245deg); }
+.rotate-250 { transform: rotate(250deg); }
+.rotate-255 { transform: rotate(255deg); }
+.rotate-260 { transform: rotate(260deg); }
+.rotate-265 { transform: rotate(265deg); }
+.rotate-270 { transform: rotate(270deg); }
+.rotate-275 { transform: rotate(275deg); }
+.rotate-280 { transform: rotate(280deg); }
+.rotate-285 { transform: rotate(285deg); }
+.rotate-290 { transform: rotate(290deg); }
+.rotate-295 { transform: rotate(295deg); }
+.rotate-300 { transform: rotate(300deg); }
+.rotate-305 { transform: rotate(305deg); }
+.rotate-310 { transform: rotate(310deg); }
+.rotate-315 { transform: rotate(315deg); }
+.rotate-320 { transform: rotate(320deg); }
+.rotate-325 { transform: rotate(325deg); }
+.rotate-330 { transform: rotate(330deg); }
+.rotate-335 { transform: rotate(335deg); }
+.rotate-340 { transform: rotate(340deg); }
+.rotate-345 { transform: rotate(345deg); }
+.rotate-350 { transform: rotate(350deg); }
+.rotate-355 { transform: rotate(355deg); }
+.rotate-360 { transform: rotate(360deg); }
+
+/* Legend styles */
+.info.legend {
+  max-height: 70vh;
+  overflow-y: auto;
+  min-width: 200px;
+}
+
+.legend-categories img {
+  transform-origin: center;
+}
+
+/* Info panel styles */
+.aircraft-list {
+  max-height: calc(100vh - 300px);
+  overflow-y: auto;
+}
+
+.aircraft-list img {
+  transform-origin: center;
+}

@@ -1,0 +1,54 @@
+# Logs and caches
+backend/logs/
+backend/local-photos/
+backend/photo-cache/
+logs/
+
+# Media files
+public/sounds/
+*.mp3
+*.wav
+*.jpg
+*.jpeg
+*.png
+*.gif
+
+# Large component directories
+# src/components/weather/
+# src/components/flight/
+# src/components/finance/
+
+# Build artifacts and dependencies
+build/
+dist/
+node_modules/
+coverage/
+
+# Environment and temporary files
+.env
+.env.template
+backend/.env.template
+*.log
+*.tmp
+*Test.js
+*_working*.js
+*old*.js
+working*.txt
+*.js~
+*.txt~
+*.css~
+
+# Documentation and configuration
+*.md
+ProjectTree.txt
+src/components/weather/textfiles/
+
+# Backend files (exclude when not working on backend)
+backend/services/
+backend/utils/
+backend/config/
+
+# Source files not frequently modified
+src/index.js
+src/index.css
+public/

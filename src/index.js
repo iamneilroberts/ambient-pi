@@ -1,9 +1,9 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import './index.css';  // This imports the Tailwind directives
-// import App from './App';
+import App from './App';
 // import App from './TestPage';
-import App from './components/SpaceLaunches';
+// import App from './components/SpaceTracker';
 const container = document.getElementById('root');
 const root = createRoot(container);
 

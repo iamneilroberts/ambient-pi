@@ -1,263 +1,392 @@
-import React, { useState, useEffect } from 'react';
-import { Rocket, Satellite, Star, Clock, Moon, AlertCircle } from 'lucide-react';
-import { config } from '../config/display-config';
+import React, { useState, useEffect, useCallback } from 'react';
+import { 
+  Rocket, Satellite, Star, AlertCircle, 
+  Bell
+} from 'lucide-react';
+import { config } from '../config/config.js';
+import NightSky from './NightSky';
 
 const SpaceTracker = () => {
-  const [spaceData, setSpaceData] = useState({
-    issPasses: [
-      { 
-        time: '2024-12-23 20:45',
-        duration: '6 min',
-        maxElevation: '45°',
-        direction: 'NW to SE',
-        brightness: '-3.2'
-      },
-      { 
-        time: '2024-12-24 19:32',
-        duration: '4 min',
-        maxElevation: '32°',
-        direction: 'W to NE',
-        brightness: '-2.8'
-      }
-    ],
-    launches: [
-      { 
-        mission: 'SpaceX Crew-9',
-        date: '2024-12-25 15:00',
-        location: 'Kennedy Space Center',
-        countdown: '1d 18h',
-        provider: 'SpaceX',
-        payload: 'Crew Dragon',
-        status: 'GO'
-      },
-      { 
-        mission: 'Artemis II',
-        date: '2024-12-30',
-        location: 'Kennedy Space Center',
-        countdown: '6d 12h',
-        provider: 'NASA',
-        payload: 'Orion Spacecraft',
-        status: 'GO'
-      }
-    ],
-    starlink: [
-      { 
-        trainId: 'G7-24',
-        time: '2024-12-23 21:15',
-        brightness: '3.2',
-        direction: 'SW',
-        elevation: '45°'
-      },
-      { 
-        trainId: 'G7-25',
-        time: '2024-12-24 20:45',
-        brightness: '2.8',
-        direction: 'W',
-        elevation: '38°'
-      }
-    ],
-    nightSky: {
-      moonPhase: 'Waxing Gibbous',
-      moonset: '03:24',
-      moonrise: '15:45',
-      illumination: '84%',
-      visiblePlanets: [
-        { name: 'Mars', direction: 'SW', elevation: '45°', brightness: '1.2' },
-        { name: 'Jupiter', direction: 'S', elevation: '65°', brightness: '-2.4' },
-        { name: 'Saturn', direction: 'W', elevation: '25°', brightness: '0.8' }
-      ],
-      conditions: {
-        visibility: 'Good',
-        cloudCover: '15%',
-        temperature: '68°F',
-        humidity: '65%',
-        seeing: '3/5'
-      }
-    }
-  });
+  const [launchError, setLaunchError] = useState(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [lastUpdate, setLastUpdate] = useState(null);
+  const [events, setEvents] = useState([]);
+  const [countdowns, setCountdowns] = useState({});
 
-  useEffect(() => {
-    const fetchSpaceData = async () => {
-      try {
-        // TODO: Implement API calls
-        // ISS passes: N2YO API
-        // const issResponse = await fetch(`https://api.n2yo.com/rest/v1/satellite/visualpasses/25544/${config.location.lat}/${config.location.lon}/0/7/300/&apiKey=${config.apis.space.n2yo}`);
-        
-        // Launches: Launch Library 2 API
-        // const launchResponse = await fetch(`https://ll.thespacedevs.com/2.2.0/launch/upcoming/?limit=5&apikey=${config.apis.space.launchLibrary}`);
-        
-        // Night sky data could come from various astronomy APIs
-        
-      } catch (error) {
-        console.error('Error fetching space data:', error);
-      }
-    };
-
-    fetchSpaceData();
-    const interval = setInterval(fetchSpaceData, config.rotation.displays.find(d => d.id === 'space').updateInterval * 1000);
+  // Add countdown calculation
+  const calculateCountdown = useCallback((timestamp) => {
+    const target = new Date(timestamp);
+    const now = new Date();
+    const diff = target - now;
     
-    return () => clearInterval(interval);
+    if (diff < 0) return { timeString: 'Past', isImminent: false };
+    
+    const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+    const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+    const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+    
+    let timeString;
+    const isImminent = diff < 1000 * 60 * 60; // Less than 1 hour
+    
+    if (days > 0) {
+      timeString = `T-${days}d ${hours}h`;
+    } else if (hours > 0) {
+      timeString = `T-${hours}h ${minutes}m`;
+    } else {
+      timeString = `T-${minutes}m`;
+    }
+    
+    return { timeString, isImminent };
   }, []);
 
-  // Calculate time until next event
-  const getNextEvent = () => {
-    const events = [
-      ...spaceData.issPasses.map(pass => ({ type: 'ISS Pass', time: new Date(pass.time) })),
-      ...spaceData.launches.map(launch => ({ type: 'Launch', time: new Date(launch.date) })),
-      ...spaceData.starlink.map(train => ({ type: 'Starlink', time: new Date(train.time) }))
-    ];
-    
-    const nextEvent = events
-      .filter(event => event.time > new Date())
-      .sort((a, b) => a.time - b.time)[0];
+  // Update countdowns every minute
+  useEffect(() => {
+    const updateCountdowns = () => {
+      const newCountdowns = {};
+      events.forEach(event => {
+        if (event.type === 'launch') {
+          newCountdowns[event.name] = calculateCountdown(event.time);
+        } else if (event.type === 'iss') {
+          newCountdowns[event.name] = calculateCountdown(event.startTime);
+        }
+      });
+      setCountdowns(newCountdowns);
+    };
 
-    return nextEvent;
+    updateCountdowns();
+    const interval = setInterval(updateCountdowns, 60000); // Update every minute
+    return () => clearInterval(interval);
+  }, [events, calculateCountdown]);
+
+  const fetchLaunches = useCallback(async () => {
+    try {
+      setLaunchError(null);
+      setIsLoading(true);
+      
+      const response = await fetch('/api/space/launches?limit=5');
+      
+      if (!response.ok) {
+        // Don't treat rate limits as errors
+        if (response.status === 429) {
+          console.log('Launch API rate limited, using cached data');
+          return; // Keep using existing events
+        } else if (response.status === 404) {
+          throw new Error('Launch data not available.');
+        } else {
+          throw new Error(`API error: ${response.status}`);
+        }
+      }
+
+      const data = await response.json();
+      
+      // Handle empty or invalid launch data
+      const launchEvents = (data.results && Array.isArray(data.results)) ? data.results.map(launch => ({
+        type: 'launch',
+        name: launch.name || 'Unknown Launch',
+        countdown: calculateCountdown(launch.net),
+        location: launch.pad?.location?.name || 'Location TBD',
+        vehicle: launch.rocket?.configuration?.name || 'Vehicle TBD',
+        description: launch.mission?.description || launch.mission_description,
+        launchPad: launch.pad?.name,
+        probability: launch.probability !== null ? `${launch.probability}%` : null,
+        time: launch.net,
+        orbit: launch.mission?.orbit?.name,
+        provider: launch.launch_service_provider?.name,
+        holdReason: launch.holdreason
+      })) : [];
+
+      // Fetch ISS passes
+      const issResponse = await fetch(
+        `/api/space/iss/passes?lat=${config.location.lat}&lng=${config.location.lon}&days=5`
+      );
+      if (!issResponse.ok) {
+        // Don't treat rate limits as errors
+        if (issResponse.status === 429) {
+          console.log('ISS API rate limited, using cached data');
+          return; // Keep using existing events
+        }
+        throw new Error('Failed to fetch ISS passes');
+      }
+      const issData = await issResponse.json();
+      
+      // Format pass times using config timezone
+      const timeFormatter = new Intl.DateTimeFormat('en-US', {
+        timeZone: config.location.timezone,
+        weekday: 'short',
+        month: 'short',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true
+      });
+      
+      const issPasses = issData.passes
+        .slice(0, 5)
+        .map(pass => ({
+          type: 'iss',
+          name: 'ISS Pass',
+          passTime: timeFormatter.format(pass.startTime),
+          elevation: pass.elevation,
+          direction: pass.direction,
+          duration: pass.duration,
+          magnitude: pass.magnitude,
+          startTime: pass.startTime,
+          isHighlyVisible: pass.elevation > 40 && pass.magnitude <= -2.5
+        }));
+
+      // Combine and sort events
+      const allEvents = [
+        ...launchEvents
+          .filter(event => {
+            const eventTime = new Date(event.time).getTime();
+            const now = new Date().getTime();
+            // Remove launches that are more than 1 hour in the past
+            return eventTime > now - (60 * 60 * 1000);
+          })
+          .map(event => ({
+            ...event,
+            sortTime: new Date(event.time).getTime()
+          })),
+        ...issPasses.map(pass => ({
+          ...pass,
+          sortTime: pass.startTime * 1000
+        }))
+      ].sort((a, b) => {
+        // Prioritize highly visible ISS passes
+        if (a.type === 'iss' && b.type === 'iss') {
+          if (a.isHighlyVisible && !b.isHighlyVisible) return -1;
+          if (!a.isHighlyVisible && b.isHighlyVisible) return 1;
+        }
+        // Then sort by time
+        return a.sortTime - b.sortTime;
+      });
+
+      setEvents(allEvents);
+      setLastUpdate(new Date());
+      setIsLoading(false);
+    } catch (error) {
+      // Only set error for non-rate-limit issues
+      if (!error.message.includes('Rate limit')) {
+        setLaunchError(error.message);
+        setEvents(prevEvents => prevEvents.filter(event => event.type !== 'launch'));
+      }
+      setIsLoading(false);
+    }
+  }, [calculateCountdown]);
+
+  // Fetch launches when component mounts
+  useEffect(() => {
+    fetchLaunches();
+    const interval = setInterval(fetchLaunches, 300000); // 5 minutes
+    return () => clearInterval(interval);
+  }, [fetchLaunches]);
+
+  // Rating component for ISS passes
+  const PassRating = ({ magnitude, elevation }) => {
+    const rating = magnitude < -2.5 && elevation > 40 ? 3 
+                 : (magnitude < -2.0 || elevation > 30) ? 2 
+                 : 1;
+    return (
+      <div className="flex">
+        {[...Array(rating)].map((_, i) => (
+          <Star key={i} className="w-4 h-4 fill-yellow-400 text-yellow-400" />
+        ))}
+      </div>
+    );
   };
 
-  const nextEvent = getNextEvent();
-
   return (
-    <div className="flex flex-col h-screen bg-gray-900 text-white p-6 space-y-6">
-      {/* Header */}
-      <div className="flex justify-between items-center">
-        <h1 className="text-3xl font-bold">Space Tracker</h1>
-        <div className="text-xl">{config.location.city}, {config.location.state}</div>
-      </div>
-
-      {/* Next Event Alert */}
-      <div className="bg-blue-900/75 p-4 rounded-lg flex items-center space-x-4">
-        <AlertCircle className="w-6 h-6" />
-        <div>
-          <div className="font-bold">Next Space Event</div>
-          <div>
-            {nextEvent ? `${nextEvent.type} - ${nextEvent.time.toLocaleString()}` : 'No upcoming events'}
+    <div className="flex h-screen bg-gray-900 text-white">
+      {/* Left Side - Events */}
+      <div className="w-1/2 p-6 border-r border-gray-800 overflow-y-auto">
+        <div className="mb-6">
+          <h1 className="text-3xl font-bold">Space Events</h1>
+          <div className="text-gray-400">
+            {config.location.city}, {config.location.state}
           </div>
         </div>
-      </div>
 
-      {/* Main Grid */}
-      <div className="grid grid-cols-2 gap-6">
-        {/* ISS Passes */}
-        <div className="bg-gray-800 p-6 rounded-lg">
-          <div className="flex items-center space-x-3 mb-4">
-            <Satellite className="w-6 h-6" />
-            <h2 className="text-xl font-bold">ISS Visible Passes</h2>
-          </div>
-          <div className="space-y-4">
-            {spaceData.issPasses.map((pass, index) => (
-              <div key={index} className="bg-gray-700/50 p-4 rounded-lg">
-                <div className="font-bold">{new Date(pass.time).toLocaleString()}</div>
-                <div className="text-sm text-gray-400">
-                  Duration: {pass.duration} | Max Elevation: {pass.maxElevation}
-                  <br />
-                  Direction: {pass.direction} | Magnitude: {pass.brightness}
+        {/* Error Alert */}
+        {launchError && (
+          <div className="bg-red-900/50 border border-red-800 rounded-lg p-4 mb-6 flex items-start gap-3">
+            <AlertCircle className="w-5 h-5 flex-shrink-0 mt-1 text-red-400" />
+            <div>
+              <div className="font-bold text-red-200">Launch Data Error</div>
+              <div className="text-red-300">{launchError}</div>
+              {lastUpdate && (
+                <div className="text-red-400 text-sm mt-1">
+                  Last successful update: {lastUpdate.toLocaleTimeString()}
                 </div>
-              </div>
-            ))}
+              )}
+            </div>
           </div>
-        </div>
+        )}
 
-        {/* Launches */}
-        <div className="bg-gray-800 p-6 rounded-lg">
-          <div className="flex items-center space-x-3 mb-4">
-            <Rocket className="w-6 h-6" />
-            <h2 className="text-xl font-bold">Upcoming Launches</h2>
+        {/* Loading State */}
+        {isLoading && events.length === 0 && (
+          <div className="bg-gray-800/50 rounded-lg p-8 mb-6">
+            <div className="flex justify-center items-center">
+              <Rocket className="w-6 h-6 animate-pulse" />
+              <span className="ml-3">Loading launch data...</span>
+            </div>
           </div>
-          <div className="space-y-4">
-            {spaceData.launches.map((launch, index) => (
-              <div key={index} className="bg-gray-700/50 p-4 rounded-lg">
-                <div className="font-bold">{launch.mission}</div>
-                <div className="text-sm text-gray-400">
-                  {new Date(launch.date).toLocaleDateString()} at {launch.location}
-                  <br />
-                  {launch.provider} | {launch.payload} | T-{launch.countdown}
-                  <div className="mt-1">
-                    Status: <span className="text-green-400">{launch.status}</span>
+        )}
+
+        {/* Events List */}
+        <div className="bg-gray-800/50 rounded-lg p-4">
+          <div className="space-y-3">
+            {events.length === 0 ? (
+              <div className="text-gray-400 text-center py-4">No upcoming events</div>
+            ) : (
+              events.map((event, index) => {
+                const getEventIcon = () => {
+                  switch (event.type) {
+                    case 'launch':
+                      return <Rocket className="w-5 h-5 text-orange-400" />;
+                    case 'iss':
+                      return <Satellite className="w-5 h-5 text-blue-400" />;
+                    default:
+                      return null;
+                  }
+                };
+
+                const countdown = countdowns[event.name] || { timeString: '', isImminent: false };
+
+                return (
+                  <div 
+                    key={index} 
+                    className={`p-3 rounded-lg transition-colors ${
+                      event.type === 'launch' 
+                        ? new Date(event.time).getTime() < new Date().getTime()
+                          ? 'bg-orange-900/20 hover:bg-orange-800/30 border border-orange-700/30'
+                          : new Date(event.time).getTime() - new Date().getTime() < 24 * 60 * 60 * 1000
+                            ? 'bg-green-900/20 hover:bg-green-800/30 border border-green-700/30'
+                            : 'bg-gray-700/50 hover:bg-gray-600/50'
+                        : event.type === 'iss' && event.isHighlyVisible
+                        ? 'bg-yellow-900/20 hover:bg-yellow-800/30 border border-yellow-700/30'
+                        : 'bg-gray-700/50 hover:bg-gray-600/50'
+                    }`}
+                  >
+                    <div className="flex justify-between items-start">
+                      <div className="flex gap-3">
+                        {getEventIcon()}
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <div className="font-bold">
+                              {event.name}
+                              {event.type === 'iss' && event.isHighlyVisible && (
+                                <span className="ml-2 text-xs bg-yellow-500/30 text-yellow-300 px-2 py-0.5 rounded-full font-medium">
+                                  Highly Visible
+                                </span>
+                              )}
+                            </div>
+                            {event.type === 'iss' && (
+                              <PassRating 
+                                magnitude={event.magnitude} 
+                                elevation={event.elevation} 
+                              />
+                            )}
+                          </div>
+                          <div className="text-sm text-gray-300">
+                            {event.type === 'launch' && (
+                              <>
+                                <div className="mb-2">
+                                  <div className="font-medium">{event.location}</div>
+                                  <div>{event.launchPad}</div>
+                                  <div className="text-gray-400">
+                                    {new Date(event.time).toLocaleString('en-US', {
+                                      timeZone: config.location.timezone,
+                                      weekday: 'short',
+                                      month: 'short',
+                                      day: 'numeric',
+                                      hour: 'numeric',
+                                      minute: '2-digit',
+                                      hour12: true
+                                    })}
+                                  </div>
+                                </div>
+                                <div className="mb-2">
+                                  <div>{event.vehicle}</div>
+                                  {event.probability && (
+                                    <div className="text-green-400">
+                                      Launch probability: {event.probability}
+                                    </div>
+                                  )}
+                                  {/* Countdown Clock for launches within 24h */}
+                                  {event.type === 'launch' && 
+                                   new Date(event.time).getTime() - new Date().getTime() < 24 * 60 * 60 * 1000 ? (
+                                    <div className="mt-2 p-2 bg-green-900/30 rounded-lg border border-green-700/30">
+                                      <div className="text-xl font-bold text-green-400">
+                                        {countdown.timeString}
+                                      </div>
+                                      <div className="text-sm text-green-300">
+                                        Launch is imminent
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    <div className={countdown.isImminent ? 'text-blue-300' : ''}>
+                                      {countdown.timeString}
+                                    </div>
+                                  )}
+                                </div>
+                                {/* Mission Details */}
+                                <div className="text-sm text-gray-400 mt-2 space-y-2">
+                                  {event.description && (
+                                    <div>{event.description}</div>
+                                  )}
+                                  {event.orbit && (
+                                    <div>
+                                      <span className="text-gray-500">Orbit:</span> {event.orbit}
+                                    </div>
+                                  )}
+                                  {event.provider && (
+                                    <div>
+                                      <span className="text-gray-500">Provider:</span> {event.provider}
+                                    </div>
+                                  )}
+                                  {event.holdReason && (
+                                    <div className="text-yellow-400">
+                                      Hold: {event.holdReason}
+                                    </div>
+                                  )}
+                                </div>
+                              </>
+                            )}
+                            {event.type === 'iss' && (
+                              <>
+                                <div className="mb-2">
+                                  <div className="text-gray-400">
+                                    {event.passTime}
+                                  </div>
+                                  <div className={countdown.isImminent ? 'text-blue-300' : ''}>
+                                    {countdown.timeString}
+                                  </div>
+                                </div>
+                                <div>
+                                  {event.elevation}° max elevation | {event.direction}
+                                  <br />
+                                  {event.duration} min | Magnitude: {event.magnitude}
+                                </div>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                      <button className="bg-blue-900/50 p-2 rounded-lg hover:bg-blue-800/50">
+                        <Bell className="w-4 h-4" />
+                      </button>
+                    </div>
                   </div>
-                </div>
-              </div>
-            ))}
+                );
+              })
+            )}
           </div>
         </div>
+      </div>
 
-        {/* Night Sky Conditions */}
-        <div className="bg-gray-800 p-6 rounded-lg">
-          <div className="flex items-center space-x-3 mb-4">
-            <Star className="w-6 h-6" />
-            <h2 className="text-xl font-bold">Night Sky Conditions</h2>
-          </div>
-          <div className="grid grid-cols-2 gap-6">
-            <div>
-              <div className="flex items-center space-x-2">
-                <Moon className="w-5 h-5" />
-                <div className="font-bold">Moon</div>
-              </div>
-              <div className="text-sm text-gray-400">
-                Phase: {spaceData.nightSky.moonPhase}
-                <br />
-                Rise: {spaceData.nightSky.moonrise}
-                <br />
-                Set: {spaceData.nightSky.moonset}
-                <br />
-                Illumination: {spaceData.nightSky.illumination}
-              </div>
-            </div>
-            <div>
-              <div className="font-bold">Viewing Conditions</div>
-              <div className="text-sm text-gray-400">
-                Visibility: {spaceData.nightSky.conditions.visibility}
-                <br />
-                Cloud Cover: {spaceData.nightSky.conditions.cloudCover}
-                <br />
-                Temperature: {spaceData.nightSky.conditions.temperature}
-                <br />
-                Seeing: {spaceData.nightSky.conditions.seeing}
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Visible Planets */}
-        <div className="bg-gray-800 p-6 rounded-lg">
-          <div className="flex items-center space-x-3 mb-4">
-            <Star className="w-6 h-6" />
-            <h2 className="text-xl font-bold">Visible Planets</h2>
-          </div>
-          <div className="space-y-4">
-            {spaceData.nightSky.visiblePlanets.map((planet, index) => (
-              <div key={index} className="bg-gray-700/50 p-4 rounded-lg">
-                <div className="font-bold">{planet.name}</div>
-                <div className="text-sm text-gray-400">
-                  Direction: {planet.direction} | Elevation: {planet.elevation}
-                  <br />
-                  Brightness: {planet.brightness} magnitude
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Starlink Passes */}
-        <div className="col-span-2 bg-gray-800 p-6 rounded-lg">
-          <div className="flex items-center space-x-3 mb-4">
-            <Clock className="w-6 h-6" />
-            <h2 className="text-xl font-bold">Starlink Passes</h2>
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            {spaceData.starlink.map((train, index) => (
-              <div key={index} className="bg-gray-700/50 p-4 rounded-lg">
-                <div className="font-bold">Train {train.trainId}</div>
-                <div className="text-sm text-gray-400">
-                  {new Date(train.time).toLocaleString()}
-                  <br />
-                  Brightness: Mag {train.brightness} | Direction: {train.direction}
-                  <br />
-                  Maximum Elevation: {train.elevation}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
+      {/* Right Side - Night Sky */}
+      <div className="w-1/2 p-6">
+        <NightSky />
       </div>
     </div>
   );

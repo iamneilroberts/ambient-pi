@@ -1,91 +1,130 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import WeatherDashboard from './WeatherDashboard';
-import SystemMonitor from './SystemMonitor';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import PhotoFrame from './PhotoFrame';
-import MarineStaticMap from './MarineStaticMap';
-import WebGLDemo from './WebGLDemo';
+import WeatherDashboard from './weather/WeatherDashboard';
+import SpaceTracker from './SpaceTracker';
 import FinanceDashboard from './finance/FinanceDashboard';
-import { config } from '../config/display-config';
+import FlightTracker from './flight/FlightTracker';
+import SystemMonitor from './SystemMonitor';
+import WebGLDemo from './WebGLDemo';
+import { config } from '../config/display-config.js';
 
 const InfoDisplayManager = () => {
-  const [currentDisplay, setCurrentDisplay] = useState('weather');
+  // List of currently implemented displays
+  const IMPLEMENTED_DISPLAYS = useMemo(() => 
+    ['weather', 'photos', 'space', 'finance', 'flight', 'system', 'webgl'],
+    []
+  );
+
+  // Initialize with display from URL parameter or first enabled display
+  const [currentDisplay, setCurrentDisplay] = useState(() => {
+    // Check URL parameters
+    const params = new URLSearchParams(window.location.search);
+    const displayParam = params.get('display');
+
+    // If display parameter exists and is implemented/enabled, use it
+    if (displayParam && IMPLEMENTED_DISPLAYS.includes(displayParam)) {
+      const display = config.rotation.displays.find(d => d.id === displayParam);
+      if (display?.enabled) {
+        return displayParam;
+      }
+    }
+
+    // Otherwise use first enabled display
+    const enabledDisplays = config.rotation.displays.filter(d => 
+      d.enabled && IMPLEMENTED_DISPLAYS.includes(d.id)
+    );
+    return enabledDisplays.length > 0 ? enabledDisplays[0].id : 'photos';
+  });
   const [isScreensaver, setIsScreensaver] = useState(false);
   const [idleTime, setIdleTime] = useState(0);
-  
+
   // Get next display helper function
   const getNextDisplay = useCallback(() => {
-    const displays = config.rotation.displays.filter(d => d.enabled);
+    const displays = config.rotation.displays.filter(d => 
+      d.enabled && IMPLEMENTED_DISPLAYS.includes(d.id)
+    );
     const currentIndex = displays.findIndex(d => d.id === currentDisplay);
     const nextIndex = (currentIndex + 1) % displays.length;
     return displays[nextIndex].id;
-  }, [currentDisplay]);
+  }, [currentDisplay, IMPLEMENTED_DISPLAYS]);
 
   // Handle manual rotation
   const rotateToNextDisplay = useCallback(() => {
     const nextDisplay = getNextDisplay();
     console.log('Manually rotating to:', nextDisplay);
     setCurrentDisplay(nextDisplay);
+    // Update URL without reloading page
+    const url = new URL(window.location);
+    url.searchParams.set('display', nextDisplay);
+    window.history.pushState({}, '', url);
     // Reset idle time when manually rotating
     setIdleTime(0);
     setIsScreensaver(false);
   }, [getNextDisplay]);
 
-  // Handle keyboard navigation
+  // Handle keyboard navigation and browser history
   useEffect(() => {
     const handleKeyPress = (event) => {
-      // Check for spacebar (key code 32) or right arrow (key code 39)
-      if (event.keyCode === 32 || event.keyCode === 39) {
+      // Check for spacebar or right arrow
+      if (event.key === ' ' || event.key === 'ArrowRight') {
         event.preventDefault(); // Prevent scrolling with spacebar
         rotateToNextDisplay();
       }
     };
 
+    // Handle browser history navigation
+    const handlePopState = () => {
+      const params = new URLSearchParams(window.location.search);
+      const displayParam = params.get('display');
+      if (displayParam && IMPLEMENTED_DISPLAYS.includes(displayParam)) {
+        const display = config.rotation.displays.find(d => d.id === displayParam);
+        if (display?.enabled) {
+          setCurrentDisplay(displayParam);
+          setIdleTime(0);
+          setIsScreensaver(false);
+        }
+      }
+    };
+
     window.addEventListener('keydown', handleKeyPress);
+    window.addEventListener('popstate', handlePopState);
 
     return () => {
       window.removeEventListener('keydown', handleKeyPress);
+      window.removeEventListener('popstate', handlePopState);
     };
-  }, [rotateToNextDisplay]);
+  }, [rotateToNextDisplay, IMPLEMENTED_DISPLAYS]);
 
-  // Handle display rotation
+  // Handle automatic display rotation
   useEffect(() => {
-    console.log('Rotation effect running, isScreensaver:', isScreensaver);
-    
-    const displays = config.rotation.displays.filter(d => d.enabled);
-    console.log('Available displays:', displays);
+    const displays = config.rotation.displays.filter(d => 
+      d.enabled && IMPLEMENTED_DISPLAYS.includes(d.id)
+    );
     
     const rotateDisplay = () => {
-      console.log('Rotating display, current:', currentDisplay);
       setCurrentDisplay(current => {
         const currentIndex = displays.findIndex(d => d.id === current);
         const nextIndex = (currentIndex + 1) % displays.length;
         const nextDisplay = displays[nextIndex].id;
-        console.log('Switching to:', nextDisplay);
+        
+        // Update URL without reloading page
+        const url = new URL(window.location);
+        url.searchParams.set('display', nextDisplay);
+        window.history.pushState({}, '', url);
+        
         return nextDisplay;
       });
     };
 
-    // Only rotate if in screensaver mode
-    let interval = null;
-    if (isScreensaver) {
-      console.log('Setting up rotation interval');
-      interval = setInterval(rotateDisplay, config.rotation.interval * 1000);
-    }
+    // Set up rotation interval
+    const interval = setInterval(rotateDisplay, config.rotation.interval * 1000);
 
-    return () => {
-      if (interval) {
-        console.log('Clearing rotation interval');
-        clearInterval(interval);
-      }
-    };
-  }, [isScreensaver, currentDisplay]);
+    return () => clearInterval(interval);
+  }, [currentDisplay, IMPLEMENTED_DISPLAYS]);
 
   // Handle idle detection
   useEffect(() => {
-    console.log('Current idle time:', idleTime);
-    
     const resetIdle = () => {
-      console.log('Resetting idle time');
       setIdleTime(0);
       setIsScreensaver(false);
     };
@@ -93,9 +132,7 @@ const InfoDisplayManager = () => {
     const incrementIdle = () => {
       setIdleTime(prev => {
         const newTime = prev + 1;
-        console.log('Incrementing idle time to:', newTime);
         if (newTime >= config.rotation.idleTimeout) {
-          console.log('Entering screensaver mode');
           setIsScreensaver(true);
         }
         return newTime;
@@ -104,7 +141,7 @@ const InfoDisplayManager = () => {
 
     // Reset idle on user interaction
     window.addEventListener('mousemove', resetIdle);
-    window.addEventListener('keypress', resetIdle);
+    window.addEventListener('keydown', resetIdle);
     window.addEventListener('click', resetIdle);
 
     // Increment idle time every second
@@ -112,29 +149,38 @@ const InfoDisplayManager = () => {
 
     return () => {
       window.removeEventListener('mousemove', resetIdle);
-      window.removeEventListener('keypress', resetIdle);
+      window.removeEventListener('keydown', resetIdle);
       window.removeEventListener('click', resetIdle);
       clearInterval(idleInterval);
     };
   }, [idleTime]);
 
-  const renderCurrentDisplay = () => {
-    console.log('Rendering display:', currentDisplay);
+  const renderCurrentDisplay = () => {    
     switch (currentDisplay) {
       case 'weather':
         return <WeatherDashboard />;
-      case 'system':
-        return <SystemMonitor />;
-      case 'marine':
-        return <MarineStaticMap />;
       case 'photos':
         return <PhotoFrame />;
-      case 'webgl':
-        return <WebGLDemo rotationInterval={config.rotation.displays.find(d => d.id === 'webgl')?.updateInterval || 300} />;
+      case 'space':
+        return <SpaceTracker />;
       case 'finance':
         return <FinanceDashboard />;
+      case 'flight':
+        return <FlightTracker />;
+      case 'system':
+        return <SystemMonitor />;
+      case 'webgl':
+        return <WebGLDemo rotationInterval={config.rotation.displays.find(d => d.id === 'webgl')?.updateInterval || 300} />;
       default:
-        return <WeatherDashboard />;
+        // If display is not implemented yet, show photos
+        // Remove this display from rotation to avoid showing unimplemented components
+        const enabledDisplays = config.rotation.displays.filter(d => 
+          d.enabled && IMPLEMENTED_DISPLAYS.includes(d.id)
+        );
+        if (enabledDisplays.length > 0) {
+          setCurrentDisplay(enabledDisplays[0].id);
+        }
+        return <PhotoFrame />;
     }
   };
 
@@ -145,7 +191,7 @@ const InfoDisplayManager = () => {
       <div className="fixed top-0 right-0 bg-black bg-opacity-50 text-white p-2 text-sm">
         Mode: {isScreensaver ? 'Screensaver' : 'Active'}<br />
         Idle: {idleTime}s<br />
-        Display: {currentDisplay}<br />
+        Display: {config.rotation.displays.find(d => d.id === currentDisplay)?.name || currentDisplay}<br />
         Press Space/→ to rotate
       </div>
     </div>

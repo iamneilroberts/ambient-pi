@@ -1,86 +1,49 @@
-// src/api/financeApi.js
-class FinanceAPI {
-  constructor() {
-    this.baseUrl = 'http://localhost:3005/stock';
-  }
+import { config as baseConfig } from '../../config/config.js';
 
-  async fetchStockData(symbol) {
+const API_BASE_URL = '/api';
+const defaultSymbols = baseConfig.preferences.stocks.symbols;
+
+// Helper function to implement exponential backoff
+async function fetchWithRetry(url, options = {}, retries = 3, baseDelay = 2000) {
+  for (let i = 0; i < retries; i++) {
     try {
-      // Fetch both quote and history data
-      const [quoteRes, historyRes] = await Promise.all([
-        fetch(`${this.baseUrl}/quote?symbol=${symbol}`),
-        fetch(`${this.baseUrl}/history?symbol=${symbol}`)
-      ]);
+      const response = await fetch(url, options);
+      const data = await response.json();
+      
+      if (response.ok) {
+        return data;
+      }
 
-      const [quote, history] = await Promise.all([
-        quoteRes.json(),
-        historyRes.json()
-      ]);
+      const errorStr = data.error?.toString?.() || '';
+      if (errorStr.includes('limit')) {
+        // If rate limited, wait with exponential backoff
+        const delay = baseDelay * Math.pow(2, i);
+        console.log(`Rate limited, retrying in ${delay}ms...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+        continue;
+      }
 
-      if (quote.error) throw new Error(quote.error);
-      if (history.error) throw new Error(history.error);
-
-      // Calculate price change
-      const priceChange = quote.regularMarketPrice - quote.previousClose;
-      const percentChange = (priceChange / quote.previousClose) * 100;
-
-      // Process historical data for chart
-      const chartData = history.timestamp.map((time, index) => ({
-        time,
-        price: history.indicators.quote[0].close[index]
-      })).filter(point => point.price !== null);
-
-      return {
-        symbol,
-        currentPrice: quote.regularMarketPrice,
-        previousClose: quote.previousClose,
-        priceChange,
-        percentChange,
-        chartData
-      };
+      throw new Error(data.error || `Failed to fetch: ${response.statusText}`);
     } catch (error) {
-      console.error(`Error fetching data for ${symbol}:`, error);
-      throw error;
+      if (i === retries - 1) throw error;
+      const delay = baseDelay * Math.pow(2, i);
+      console.log(`Request failed, retrying in ${delay}ms...`);
+      await new Promise(resolve => setTimeout(resolve, delay));
     }
-  }
-
-  async fetchBatchStockData(symbols) {
-    try {
-      return await Promise.all(
-        symbols.map(symbol => this.fetchStockData(symbol))
-      );
-    } catch (error) {
-      console.error('Error in batch fetch:', error);
-      throw error;
-    }
-  }
-
-  formatPrice(price) {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD'
-    }).format(price);
-  }
-
-  formatChange(change, percent = false) {
-    const formatted = new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD',
-      signDisplay: 'always'
-    }).format(change);
-
-    if (percent) {
-      const percentFormatted = new Intl.NumberFormat('en-US', {
-        style: 'percent',
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-        signDisplay: 'always'
-      }).format(change / 100);
-      return `${formatted} (${percentFormatted})`;
-    }
-
-    return formatted;
   }
 }
 
-export const financeApi = new FinanceAPI();
+export async function fetchStockQuote(symbol) {
+  if (!symbol) {
+    throw new Error('Symbol is required');
+  }
+  return fetchWithRetry(`${API_BASE_URL}/stock/quote?symbol=${symbol}`);
+}
+
+export async function fetchStockHistory(symbol) {
+  return fetchWithRetry(`${API_BASE_URL}/stock/history?symbol=${symbol}`);
+}
+
+export async function fetchMarketNews(symbols = defaultSymbols) {
+  return fetchWithRetry(`${API_BASE_URL}/stock/news?symbols=${symbols.join(',')}`);
+}

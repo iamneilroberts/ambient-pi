@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Plane, Anchor, Train, Layers, RadioTower } from 'lucide-react';
-import { config } from '../config/display-config';
+import { config } from '../../config.mjs';
 
 const TransportTracker = () => {
   const [transportData, setTransportData] = useState({

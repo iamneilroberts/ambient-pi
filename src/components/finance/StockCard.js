@@ -1,64 +1,94 @@
 import React from 'react';
-import { TrendingUp, TrendingDown, X, Loader } from 'lucide-react';
 
-const StockCard = ({ stock, onRemove, isEditing }) => {
-  if (stock.loading) {
+const StockCard = ({ data, isLoading, error }) => {
+  console.log('StockCard render:', { symbol: data?.['Global Quote']?.['01. symbol'], isLoading, hasError: !!error, hasData: !!data?.['Global Quote'] });
+
+  const renderContent = () => {
+    if (isLoading) {
+      console.log('StockCard: Showing loading skeleton');
+      return (
+        <div className="animate-pulse">
+          <div className="h-4 bg-gray-700 rounded w-3/4 mb-4"></div>
+          <div className="h-8 bg-gray-700 rounded w-1/2 mb-4"></div>
+          <div className="h-4 bg-gray-700 rounded w-full"></div>
+        </div>
+      );
+    }
+
+    if (error) {
+      console.log('StockCard: Showing error state:', error);
+      return (
+        <div className="text-red-400">Error: {error.message || error}</div>
+      );
+    }
+
+    if (!data?.['Global Quote']) {
+      console.log('StockCard: No data available');
+      return (
+        <div className="text-gray-400">No data available</div>
+      );
+    }
+
+    console.log('StockCard: Rendering data for:', data['Global Quote']['01. symbol']);
+
+    const quote = data['Global Quote'];
+    const price = parseFloat(quote['05. price']);
+    const change = parseFloat(quote['09. change']);
+    const changePercent = parseFloat(quote['10. change percent'].replace('%', ''));
+    const isPositive = change >= 0;
+
     return (
-      <div className="bg-gray-800 rounded-lg p-4 min-h-[200px] flex items-center justify-center">
-        <Loader className="w-6 h-6 animate-spin text-blue-400" />
-      </div>
+      <>
+        <div className="flex justify-between items-start mb-4">
+          <div>
+            <h3 className="text-lg font-bold text-white">
+              {quote['01. symbol']}
+            </h3>
+            <div className="text-3xl font-bold text-white mt-1">
+              ${price.toFixed(2)}
+            </div>
+          </div>
+          <div className={`text-right ${isPositive ? 'text-green-400' : 'text-red-400'}`}>
+            <div className="text-lg font-bold">
+              {isPositive ? '+' : ''}{change.toFixed(2)}
+            </div>
+            <div>
+              {isPositive ? '+' : ''}{changePercent.toFixed(2)}%
+            </div>
+          </div>
+        </div>
+        
+        <div className="grid grid-cols-2 gap-4 text-sm">
+          <div>
+            <div className="text-gray-400">Open</div>
+            <div className="text-white">${parseFloat(quote['02. open']).toFixed(2)}</div>
+          </div>
+          <div>
+            <div className="text-gray-400">Previous Close</div>
+            <div className="text-white">${parseFloat(quote['08. previous close']).toFixed(2)}</div>
+          </div>
+          <div>
+            <div className="text-gray-400">High</div>
+            <div className="text-white">${parseFloat(quote['03. high']).toFixed(2)}</div>
+          </div>
+          <div>
+            <div className="text-gray-400">Low</div>
+            <div className="text-white">${parseFloat(quote['04. low']).toFixed(2)}</div>
+          </div>
+          <div className="col-span-2">
+            <div className="text-gray-400">Volume</div>
+            <div className="text-white">
+              {parseInt(quote['06. volume']).toLocaleString()}
+            </div>
+          </div>
+        </div>
+      </>
     );
-  }
-
-  const isPositive = stock.percentChange >= 0;
+  };
 
   return (
-    <div className="bg-gray-800 rounded-lg p-4">
-      {/* Header with symbol and remove button */}
-      <div className="flex justify-between items-start mb-4">
-        <div>
-          <h3 className="text-xl font-bold">{stock.symbol}</h3>
-        </div>
-        {isEditing && (
-          <button
-            onClick={() => onRemove(stock.symbol)}
-            className="text-red-500 hover:text-red-400"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        )}
-      </div>
-
-      {/* Price and change */}
-      <div className="mb-4">
-        <div className="text-2xl font-bold">
-          ${stock.currentPrice?.toFixed(2)}
-        </div>
-        <div className={`flex items-center gap-1 ${
-          isPositive ? 'text-green-500' : 'text-red-500'
-        }`}>
-          {isPositive ? (
-            <TrendingUp className="w-4 h-4" />
-          ) : (
-            <TrendingDown className="w-4 h-4" />
-          )}
-          <span>
-            {stock.priceChange?.toFixed(2)} ({stock.percentChange?.toFixed(2)}%)
-          </span>
-        </div>
-      </div>
-
-      {/* Additional stats */}
-      <div className="grid grid-cols-2 gap-4 text-sm text-gray-400">
-        <div>
-          <div className="font-medium">Volume</div>
-          <div>{stock.volume?.toLocaleString()}</div>
-        </div>
-        <div>
-          <div className="font-medium">Day Range</div>
-          <div>${stock.dayLow?.toFixed(2)} - ${stock.dayHigh?.toFixed(2)}</div>
-        </div>
-      </div>
+    <div className="bg-gray-800 rounded-lg shadow-lg p-4 min-w-[300px]">
+      {renderContent()}
     </div>
   );
 };
