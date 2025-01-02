@@ -13,7 +13,6 @@ const SpaceTracker = () => {
   const [events, setEvents] = useState([]);
   const [countdowns, setCountdowns] = useState({});
 
-  // Add countdown calculation
   const calculateCountdown = useCallback((timestamp) => {
     const target = new Date(timestamp);
     const now = new Date();
@@ -39,7 +38,6 @@ const SpaceTracker = () => {
     return { timeString, isImminent };
   }, []);
 
-  // Update countdowns every minute
   useEffect(() => {
     const updateCountdowns = () => {
       const newCountdowns = {};
@@ -54,21 +52,26 @@ const SpaceTracker = () => {
     };
 
     updateCountdowns();
-    const interval = setInterval(updateCountdowns, 60000); // Update every minute
+    const interval = setInterval(updateCountdowns, 60000);
     return () => clearInterval(interval);
   }, [events, calculateCountdown]);
 
-  const fetchLaunches = useCallback(async () => {
+  const fetchLaunches = useCallback(async (skipLoading = false) => {
     try {
       setLaunchError(null);
-      setIsLoading(true);
+      if (!skipLoading) {
+        setIsLoading(true);
+      }
       
-      const response = await fetch('/api/space/launches?limit=5');
+      const response = await fetch('/api/space/launches?limit=5', {
+        headers: {
+          'Cache-Control': 'no-cache',
+          'Pragma': 'no-cache'
+        }
+      });
       
       if (!response.ok) {
-        // Don't treat rate limits as errors
         if (response.status === 429) {
-          console.log('Launch API rate limited, using cached data');
           return; // Keep using existing events
         } else if (response.status === 404) {
           throw new Error('Launch data not available.');
@@ -79,7 +82,6 @@ const SpaceTracker = () => {
 
       const data = await response.json();
       
-      // Handle empty or invalid launch data
       const launchEvents = (data.results && Array.isArray(data.results)) ? data.results.map(launch => ({
         type: 'launch',
         name: launch.name || 'Unknown Launch',
@@ -95,21 +97,17 @@ const SpaceTracker = () => {
         holdReason: launch.holdreason
       })) : [];
 
-      // Fetch ISS passes
       const issResponse = await fetch(
         `/api/space/iss/passes?lat=${config.location.lat}&lng=${config.location.lon}&days=5`
       );
       if (!issResponse.ok) {
-        // Don't treat rate limits as errors
         if (issResponse.status === 429) {
-          console.log('ISS API rate limited, using cached data');
           return; // Keep using existing events
         }
         throw new Error('Failed to fetch ISS passes');
       }
       const issData = await issResponse.json();
       
-      // Format pass times using config timezone
       const timeFormatter = new Intl.DateTimeFormat('en-US', {
         timeZone: config.location.timezone,
         weekday: 'short',
@@ -134,13 +132,11 @@ const SpaceTracker = () => {
           isHighlyVisible: pass.elevation > 40 && pass.magnitude <= -2.5
         }));
 
-      // Combine and sort events
       const allEvents = [
         ...launchEvents
           .filter(event => {
             const eventTime = new Date(event.time).getTime();
             const now = new Date().getTime();
-            // Remove launches that are more than 1 hour in the past
             return eventTime > now - (60 * 60 * 1000);
           })
           .map(event => ({
@@ -152,12 +148,10 @@ const SpaceTracker = () => {
           sortTime: pass.startTime * 1000
         }))
       ].sort((a, b) => {
-        // Prioritize highly visible ISS passes
         if (a.type === 'iss' && b.type === 'iss') {
           if (a.isHighlyVisible && !b.isHighlyVisible) return -1;
           if (!a.isHighlyVisible && b.isHighlyVisible) return 1;
         }
-        // Then sort by time
         return a.sortTime - b.sortTime;
       });
 
@@ -165,7 +159,6 @@ const SpaceTracker = () => {
       setLastUpdate(new Date());
       setIsLoading(false);
     } catch (error) {
-      // Only set error for non-rate-limit issues
       if (!error.message.includes('Rate limit')) {
         setLaunchError(error.message);
         setEvents(prevEvents => prevEvents.filter(event => event.type !== 'launch'));
@@ -174,14 +167,46 @@ const SpaceTracker = () => {
     }
   }, [calculateCountdown]);
 
-  // Fetch launches when component mounts
   useEffect(() => {
-    fetchLaunches();
-    const interval = setInterval(fetchLaunches, 300000); // 5 minutes
-    return () => clearInterval(interval);
-  }, [fetchLaunches]);
+    fetch('/api/space/launches?limit=5', {
+      headers: {
+        'Cache-Control': 'only-if-cached',
+        'Pragma': 'no-cache'
+      }
+    })
+    .then(async response => {
+      if (response.ok) {
+        const data = await response.json();
+        setEvents(prevEvents => {
+          const launchEvents = (data.results && Array.isArray(data.results)) 
+            ? data.results.map(launch => ({
+                type: 'launch',
+                name: launch.name || 'Unknown Launch',
+                countdown: calculateCountdown(launch.net),
+                location: launch.pad?.location?.name || 'Location TBD',
+                vehicle: launch.rocket?.configuration?.name || 'Vehicle TBD',
+                description: launch.mission?.description || launch.mission_description,
+                launchPad: launch.pad?.name,
+                probability: launch.probability !== null ? `${launch.probability}%` : null,
+                time: launch.net,
+                orbit: launch.mission?.orbit?.name,
+                provider: launch.launch_service_provider?.name,
+                holdReason: launch.holdreason,
+                sortTime: new Date(launch.net).getTime()
+              }))
+            : [];
+          return [...launchEvents, ...prevEvents.filter(event => event.type === 'iss')];
+        });
+        setIsLoading(false);
+      }
+    })
+    .catch(() => {/* Ignore cache misses */});
 
-  // Rating component for ISS passes
+    fetchLaunches(true);
+    const interval = setInterval(() => fetchLaunches(true), 300000);
+    return () => clearInterval(interval);
+  }, [fetchLaunches, calculateCountdown]);
+
   const PassRating = ({ magnitude, elevation }) => {
     const rating = magnitude < -2.5 && elevation > 40 ? 3 
                  : (magnitude < -2.0 || elevation > 30) ? 2 
@@ -196,19 +221,18 @@ const SpaceTracker = () => {
   };
 
   return (
-    <div className="flex h-screen bg-gray-900 text-white">
-      {/* Left Side - Events */}
-      <div className="w-1/2 p-6 border-r border-gray-800 overflow-y-auto">
-        <div className="mb-6">
-          <h1 className="text-3xl font-bold">Space Events</h1>
-          <div className="text-gray-400">
-            {config.location.city}, {config.location.state}
+    <div className="fixed inset-0 overflow-auto bg-gray-900 text-white pb-32">
+      <div className="flex flex-col md:flex-row min-h-screen">
+        <div className="w-full md:w-1/2 p-4 md:p-6 md:border-r border-gray-800 mb-4 md:mb-0">
+          <div className="mb-6">
+            <h1 className="text-3xl font-bold">Space Events</h1>
+            <div className="text-gray-400">
+              {config.location.city}, {config.location.state}
+            </div>
           </div>
-        </div>
 
-        {/* Error Alert */}
-        {launchError && (
-          <div className="bg-red-900/50 border border-red-800 rounded-lg p-4 mb-6 flex items-start gap-3">
+          {launchError && (
+            <div className="bg-red-900/50 border border-red-800 rounded-lg p-4 mb-6 flex items-start gap-3">
             <AlertCircle className="w-5 h-5 flex-shrink-0 mt-1 text-red-400" />
             <div>
               <div className="font-bold text-red-200">Launch Data Error</div>
@@ -220,21 +244,19 @@ const SpaceTracker = () => {
               )}
             </div>
           </div>
-        )}
+          )}
 
-        {/* Loading State */}
-        {isLoading && events.length === 0 && (
-          <div className="bg-gray-800/50 rounded-lg p-8 mb-6">
+          {isLoading && events.length === 0 && (
+            <div className="bg-gray-800/50 rounded-lg p-8 mb-6">
             <div className="flex justify-center items-center">
               <Rocket className="w-6 h-6 animate-pulse" />
               <span className="ml-3">Loading launch data...</span>
             </div>
           </div>
-        )}
+          )}
 
-        {/* Events List */}
-        <div className="bg-gray-800/50 rounded-lg p-4">
-          <div className="space-y-3">
+            <div className="bg-gray-800/50 rounded-lg p-4">
+              <div className="space-y-3">
             {events.length === 0 ? (
               <div className="text-gray-400 text-center py-4">No upcoming events</div>
             ) : (
@@ -255,7 +277,7 @@ const SpaceTracker = () => {
                 return (
                   <div 
                     key={index} 
-                    className={`p-3 rounded-lg transition-colors ${
+                    className={`p-2 md:p-3 rounded-lg transition-colors ${
                       event.type === 'launch' 
                         ? new Date(event.time).getTime() < new Date().getTime()
                           ? 'bg-orange-900/20 hover:bg-orange-800/30 border border-orange-700/30'
@@ -268,14 +290,16 @@ const SpaceTracker = () => {
                     }`}
                   >
                     <div className="flex justify-between items-start">
-                      <div className="flex gap-3">
-                        {getEventIcon()}
-                        <div>
+                      <div className="flex gap-2 md:gap-3">
+                        <div className="flex-shrink-0 mt-1">
+                          {getEventIcon()}
+                        </div>
+                        <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-2">
-                            <div className="font-bold">
+                            <div className="font-bold text-sm md:text-base break-words">
                               {event.name}
                               {event.type === 'iss' && event.isHighlyVisible && (
-                                <span className="ml-2 text-xs bg-yellow-500/30 text-yellow-300 px-2 py-0.5 rounded-full font-medium">
+                                <span className="block md:inline mt-1 md:mt-0 md:ml-2 text-xs bg-yellow-500/30 text-yellow-300 px-2 py-0.5 rounded-full font-medium">
                                   Highly Visible
                                 </span>
                               )}
@@ -291,9 +315,9 @@ const SpaceTracker = () => {
                             {event.type === 'launch' && (
                               <>
                                 <div className="mb-2">
-                                  <div className="font-medium">{event.location}</div>
-                                  <div>{event.launchPad}</div>
-                                  <div className="text-gray-400">
+                                  <div className="font-medium text-sm md:text-base">{event.location}</div>
+                                  <div className="text-sm">{event.launchPad}</div>
+                                  <div className="text-xs md:text-sm text-gray-400">
                                     {new Date(event.time).toLocaleString('en-US', {
                                       timeZone: config.location.timezone,
                                       weekday: 'short',
@@ -312,11 +336,10 @@ const SpaceTracker = () => {
                                       Launch probability: {event.probability}
                                     </div>
                                   )}
-                                  {/* Countdown Clock for launches within 24h */}
                                   {event.type === 'launch' && 
                                    new Date(event.time).getTime() - new Date().getTime() < 24 * 60 * 60 * 1000 ? (
                                     <div className="mt-2 p-2 bg-green-900/30 rounded-lg border border-green-700/30">
-                                      <div className="text-xl font-bold text-green-400">
+                                      <div className="text-lg md:text-xl font-bold text-green-400">
                                         {countdown.timeString}
                                       </div>
                                       <div className="text-sm text-green-300">
@@ -329,8 +352,7 @@ const SpaceTracker = () => {
                                     </div>
                                   )}
                                 </div>
-                                {/* Mission Details */}
-                                <div className="text-sm text-gray-400 mt-2 space-y-2">
+                                <div className="text-xs md:text-sm text-gray-400 mt-2 space-y-2">
                                   {event.description && (
                                     <div>{event.description}</div>
                                   )}
@@ -372,21 +394,21 @@ const SpaceTracker = () => {
                           </div>
                         </div>
                       </div>
-                      <button className="bg-blue-900/50 p-2 rounded-lg hover:bg-blue-800/50">
-                        <Bell className="w-4 h-4" />
+                      <button className="bg-blue-900/50 p-1.5 md:p-2 rounded-lg hover:bg-blue-800/50 flex-shrink-0">
+                        <Bell className="w-3 h-3 md:w-4 md:h-4" />
                       </button>
                     </div>
                   </div>
                 );
               })
             )}
-          </div>
+              </div>
+            </div>
         </div>
-      </div>
 
-      {/* Right Side - Night Sky */}
-      <div className="w-1/2 p-6">
-        <NightSky />
+        <div className="w-full md:w-1/2 p-4 md:p-6 h-[400px] md:h-auto">
+          <NightSky />
+        </div>
       </div>
     </div>
   );

@@ -1,0 +1,11 @@
+{
+  "name": "ambient-pi-scripts",
+  "version": "1.0.0",
+  "type": "module",
+  "dependencies": {
+    "dotenv": "^16.4.7",
+    "googleapis": "^144.0.0",
+    "open": "^10.1.0",
+    "server-destroy": "^1.0.1"
+  }
+}

@@ -23,9 +23,7 @@ const NightSky = () => {
   useEffect(() => {
     const calculateSkyData = () => {
       try {
-        // Use midnight for static display
         const now = new Date();
-        now.setHours(0, 0, 0, 0);
         const time = Astronomy.MakeTime(now);
         const observer = new Astronomy.Observer(
           config.location.lat,

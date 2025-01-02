@@ -1,3 +1,32 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* Mobile safe area utilities */
+@supports(padding: max(0px)) {
+  .h-safe-area-inset-bottom {
+    height: max(0px, env(safe-area-inset-bottom));
+  }
+}
+
+/* Add padding to main content to prevent overlap with bottom nav */
+@media (max-width: 768px) {
+  .min-h-screen {
+    padding-bottom: calc(4rem + env(safe-area-inset-bottom, 0px));
+  }
+  
+  /* Adjust content spacing */
+  .p-4 {
+    padding: 1rem 0.75rem;
+  }
+  
+  /* Make text more readable on mobile */
+  .text-xs {
+    font-size: 0.8rem;
+  }
+  
+  /* Improve touch targets */
+  button {
+    min-height: 44px;
+  }
+}

@@ -1,11 +1,14 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { config } from '../config/config.js';
+import { useTheme } from './themes/ThemeProvider';
 
 const PhotoFrame = () => {
   const [currentPhotoIndex, setCurrentPhotoIndex] = useState(0);
   const [photos, setPhotos] = useState([]);
+  // eslint-disable-next-line no-unused-vars
   const [preloadedImages, setPreloadedImages] = useState([]);
   const [error, setError] = useState(null);
+  const { currentTheme } = useTheme();
 
   // Function to load photos from configured sources
   const loadPhotos = useCallback(async () => {
@@ -20,7 +23,7 @@ const PhotoFrame = () => {
         for (const pathConfig of source.paths) {
           try {
             console.log('Fetching local photos from:', pathConfig.path);
-            const response = await fetch(`http://localhost:3002/api/photos/local?path=${encodeURIComponent(pathConfig.path)}`);
+            const response = await fetch(`/api/photos/local?path=${encodeURIComponent(pathConfig.path)}`);
             if (!response.ok) throw new Error(`Failed to load local photos: ${response.statusText}`);
             const photos = await response.json();
             console.log('Loaded local photos:', JSON.stringify(photos, null, 2));
@@ -41,7 +44,7 @@ const PhotoFrame = () => {
 
       for (const source of remoteSources) {
         try {
-          const response = await fetch(`http://localhost:3002/api/photos/cached?service=${source.service}`);
+          const response = await fetch(`/api/photos/cached?service=${source.service}`);
           if (!response.ok) throw new Error(`Failed to load cached photos: ${response.statusText}`);
           const photos = await response.json();
           loadedPhotos.push(...photos.map(photo => ({
@@ -82,7 +85,7 @@ const PhotoFrame = () => {
       const photo = photos[nextIndex];
       if (photo) {
         const img = new Image();
-        const imgUrl = `http://localhost:3002/api/photos/file?path=${encodeURIComponent(photo.path)}`;
+        const imgUrl = `/api/photos/file?path=${encodeURIComponent(photo.path)}`;
         console.log('Preloading image:', imgUrl);
         img.onload = () => console.log('Image loaded successfully:', imgUrl);
         img.onerror = (err) => console.error('Image failed to load:', imgUrl, err);
@@ -133,35 +136,37 @@ const PhotoFrame = () => {
   }
 
   const currentPhoto = photos[currentPhotoIndex];
-  const photoUrl = `http://localhost:3002/api/photos/file?path=${encodeURIComponent(currentPhoto.path)}`;
+  const photoUrl = `/api/photos/file?path=${encodeURIComponent(currentPhoto.path)}`;
 
   return (
-    <div className="relative h-full w-full bg-black" style={{ minHeight: '100vh' }}>
-      <img
-        src={photoUrl}
-        alt={currentPhoto.name || 'Photo'}
-        className="absolute inset-0 w-full h-full object-contain"
-        style={{
-          opacity: 1,
-          zIndex: 1
-        }}
+    <div className="relative h-full w-full bg-black p-2 md:p-8" style={{ minHeight: '100vh' }}>
+      <div className={`relative h-full w-full rounded-lg bg-gray-200 p-2 md:p-4 photo-frame theme-${currentTheme}-frame`}>
+        <img
+          src={photoUrl}
+          alt={currentPhoto.name || 'Photo'}
+          className="w-full h-full object-contain rounded"
+          style={{
+            opacity: 1,
+            zIndex: 1
+          }}
         onLoad={() => console.log('Current image loaded:', photoUrl)}
         onError={(err) => console.error('Current image failed to load:', photoUrl, err)}
       />
       
-      {config.localServices.photos.display.showMetadata && (
-        <div className="absolute bottom-0 left-0 right-0 bg-black bg-opacity-50 text-white p-4" style={{ zIndex: 2 }}>
-          <p className="text-lg">{currentPhoto.name}</p>
+        {config.localServices.photos.display.showMetadata && (
+          <div className="absolute bottom-0 left-0 right-0 bg-black bg-opacity-50 text-white p-2 md:p-4 rounded-b" style={{ zIndex: 2 }}>
+          <p className="text-base md:text-lg">{currentPhoto.name}</p>
           {currentPhoto.metadata && (
-            <p className="text-sm opacity-75">
+            <p className="text-xs md:text-sm opacity-75">
               {currentPhoto.metadata.dateTaken && 
                 new Date(currentPhoto.metadata.dateTaken).toLocaleDateString()}
               {currentPhoto.metadata.camera && ` • ${currentPhoto.metadata.camera}`}
             </p>
           )}
           <p className="text-sm opacity-75">Source: {currentPhoto.sourceName}</p>
-        </div>
-      )}
+          </div>
+        )}
+      </div>
     </div>
   );
 };

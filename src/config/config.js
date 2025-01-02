@@ -12,8 +12,8 @@ export const config = {
   location: {
     city: "Bexley",
     state: "MS",
-    lat: 30.9386,
-    lon: -88.6358,
+    lat: 30.8352,
+    lon: -88.7205,
     timezone: "America/Chicago",
     nearestPort: "Mobile",
     railroadLine: "CSX NO&M"
@@ -110,7 +110,7 @@ export const config = {
       distance: "mi"
     },
     stocks: {
-      symbols: ["AAPL", "GOOGL", "MSFT", "AMZN"],
+      symbols: ["AAPL", "GOOGL", "MSFT", "AMZN", "ASTS", "RKLB"],
       updateInterval: 300
     },
     radar: {

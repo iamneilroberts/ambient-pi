@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { AlertTriangle, Volume2, VolumeX } from 'lucide-react';
 
 const WeatherAlerts = ({ alerts }) => {
@@ -37,27 +37,8 @@ const WeatherAlerts = ({ alerts }) => {
     audio.muted = muted;
   }, [muted, audio]);
 
-  // Handle new alerts
-  useEffect(() => {
-    if (!alerts || alerts.length === 0) return;
-
-    // Get the most recent alert
-    const latestAlert = alerts.reduce((latest, current) => {
-      const currentTime = new Date(current.expires).getTime();
-      return !latest || currentTime > new Date(latest.expires).getTime() ? current : latest;
-    }, null);
-
-    // Only play sound if it's a new alert
-    if (latestAlert && (!lastAlertTime || new Date(latestAlert.expires).getTime() !== lastAlertTime)) {
-      setLastAlertTime(new Date(latestAlert.expires).getTime());
-      if (!muted && audioLoaded) {
-        playAlertSound();
-      }
-    }
-  }, [alerts, muted, lastAlertTime, audio, audioLoaded]);
-
   // Play alert sound
-  const playAlertSound = () => {
+  const playAlertSound = useCallback(() => {
     if (!audioLoaded) {
       console.log('Audio not yet loaded, trying to load...');
       audio.load();
@@ -82,7 +63,26 @@ const WeatherAlerts = ({ alerts }) => {
     } catch (error) {
       console.error('Error playing alert sound:', error);
     }
-  };
+  }, [audio, audioLoaded]);
+
+  // Handle new alerts
+  useEffect(() => {
+    if (!alerts || alerts.length === 0) return;
+
+    // Get the most recent alert
+    const latestAlert = alerts.reduce((latest, current) => {
+      const currentTime = new Date(current.expires).getTime();
+      return !latest || currentTime > new Date(latest.expires).getTime() ? current : latest;
+    }, null);
+
+    // Only play sound if it's a new alert
+    if (latestAlert && (!lastAlertTime || new Date(latestAlert.expires).getTime() !== lastAlertTime)) {
+      setLastAlertTime(new Date(latestAlert.expires).getTime());
+      if (!muted && audioLoaded) {
+        playAlertSound();
+      }
+    }
+  }, [alerts, muted, lastAlertTime, audio, audioLoaded, playAlertSound]);
 
   if (!alerts || alerts.length === 0) return null;
 

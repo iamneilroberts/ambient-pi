@@ -1,121 +1,137 @@
 const express = require('express');
-const axios = require('axios');
 const rateLimit = require('express-rate-limit');
-const NodeCache = require('node-cache');
 const yahooFinance = require('yahoo-finance2').default;
+const configService = require('./configService');
+const cacheService = require('./cacheService');
+const databaseService = require('./databaseService');
 
-// Initialize cache with 24 hour TTL
-const memoryCache = new NodeCache({ 
-  stdTTL: 24 * 60 * 60, // 24 hours in seconds
-  checkperiod: 60 * 60 // Check for expired keys every hour
-});
+// Queue management
+class RequestQueue {
+  constructor() {
+    this.queue = [];
+    this.isProcessing = false;
+    this.batchSize = 5;
+    this.batchDelay = 2000;
+    this.maxProcessingTime = 20000;
+  }
 
-// Queue for managing API requests
-const requestQueue = [];
-let isProcessingQueue = false;
+  async add(params, resolve) {
+    this.queue.push({ params, resolve });
+    this.process();
+  }
 
-// Process queue with delay between requests
-async function processQueue() {
-  if (isProcessingQueue || requestQueue.length === 0) return;
-  
-  isProcessingQueue = true;
-  while (requestQueue.length > 0) {
-    const { params, resolve, reject } = requestQueue.shift();
+  async process() {
+    if (this.isProcessing || this.queue.length === 0) return;
+    
+    this.isProcessing = true;
+    const batchStartTime = Date.now();
+    let processedCount = 0;
+
     try {
-      const data = await fetchAlphaVantage(params, false);
+      while (this.queue.length > 0) {
+        const { params, resolve } = this.queue.shift();
+        await this.processRequest(params, resolve);
+        
+        processedCount++;
+        const shouldDelay = processedCount >= this.batchSize || 
+                          Date.now() - batchStartTime > this.maxProcessingTime;
+        
+        if (shouldDelay && this.queue.length > 0) {
+          await new Promise(resolve => setTimeout(resolve, this.batchDelay));
+        }
+      }
+    } finally {
+      this.isProcessing = false;
+    }
+  }
+
+  async processRequest(params, resolve) {
+    try {
+      // Always check cache first
+      const cached = databaseService.getStockData(params.symbol, params.function);
+      const now = Date.now();
+      
+      // If we have cached data, check its age
+      if (cached) {
+        const cacheAge = now - new Date(cached.metadata?.timestamp).getTime();
+        const isStale = cacheAge > 3600000; // 1 hour
+        
+        // Return cached data with metadata
+        resolve({
+          ...cached,
+          _cache: {
+            status: isStale ? 'stale' : 'fresh',
+            timestamp: cached.metadata?.timestamp,
+            age: Math.floor(cacheAge / 1000)
+          }
+        });
+
+        // If data is stale, fetch new data in background
+        if (isStale) {
+          this.fetchAndCache(params).catch(console.error);
+        }
+        
+        return;
+      }
+
+      // No cache, fetch new data
+      const data = await this.fetchAndCache(params);
       resolve(data);
     } catch (error) {
-      console.error('Queue processing error:', error);
-      reject(error);
+      // On error, try to return cached data if available
+      const cached = databaseService.getStockData(params.symbol, params.function);
+      if (cached) {
+        const now = Date.now();
+        const cacheAge = now - new Date(cached.metadata?.timestamp).getTime();
+        resolve({
+          ...cached,
+          _cache: {
+            status: 'stale',
+            timestamp: cached.metadata?.timestamp,
+            age: Math.floor(cacheAge / 1000)
+          }
+        });
+      } else {
+        resolve({ error: error.message });
+      }
     }
-    // Wait 15 seconds between requests to stay well under rate limits
-    await new Promise(resolve => setTimeout(resolve, 15000));
   }
-  isProcessingQueue = false;
+
+  async fetchAndCache(params) {
+    const data = await fetchYahooFinance(params);
+    if (!data) {
+      throw new Error('No data available');
+    }
+
+    // Add metadata
+    data.metadata = { timestamp: new Date().toISOString() };
+    
+    // Cache the data
+    databaseService.setStockData(params.symbol, data, params.function);
+    
+    // Return with cache info
+    return {
+      ...data,
+      _cache: {
+        status: 'fresh',
+        timestamp: data.metadata.timestamp,
+        age: 0
+      }
+    };
+  }
 }
 
-// Rate limiting middleware for Alpha Vantage API (5 requests per 15 seconds)
-const alphaVantageLimiter = rateLimit({
-  windowMs: 15 * 1000, // 15 seconds
-  max: 5, // 5 requests per window
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: 'Rate limit exceeded. Please try again later.' },
-  keyGenerator: (req) => {
-    return req.ip;
-  }
+const requestQueue = new RequestQueue();
+
+// Rate limiting middleware - 5 requests per 10 seconds
+const stockLimiter = rateLimit({
+  windowMs: 10000,
+  max: 5,
+  message: { error: 'Rate limit exceeded. Please try again later.' }
 });
-
-// Helper function to fetch from Alpha Vantage with caching
-async function fetchAlphaVantage(params, fallbackAttempted = false) {
-  console.log('Fetching from Alpha Vantage:', params);
-  const cacheKey = JSON.stringify(params);
-  const cached = memoryCache.get(cacheKey);
-  
-  if (cached) {
-    console.log('Returning cached data for:', params);
-    return cached;
-  }
-
-  const apiKey = process.env.REACT_APP_ALPHA_VANTAGE_API_KEY;
-  if (!apiKey) {
-    console.error('Alpha Vantage API key not configured');
-    throw new Error('API key not configured');
-  }
-
-  try {
-    const url = 'https://www.alphavantage.co/query';
-    const response = await axios.get(url, {
-      params: {
-        ...params,
-        apikey: apiKey
-      },
-      timeout: 5000 // 5 second timeout
-    });
-
-    console.log('Alpha Vantage response:', response.data);
-
-    // Check for various types of API limits and errors
-    if (response.data['Information']?.includes('standard API rate limit') ||
-        response.data['Note']?.includes('API call frequency')) {
-      if (!fallbackAttempted) {
-        console.log('Alpha Vantage rate limited, falling back to Yahoo Finance');
-        return await fetchYahooFinance(params);
-      }
-      throw new Error('Rate limit exceeded. Please try again later.');
-    }
-
-    if (response.data['Error Message']) {
-      if (!fallbackAttempted) {
-        console.log('Alpha Vantage error, falling back to Yahoo Finance');
-        return await fetchYahooFinance(params);
-      }
-      throw new Error(response.data['Error Message']);
-    }
-
-    memoryCache.set(cacheKey, response.data);
-    return response.data;
-  } catch (error) {
-    console.error('Alpha Vantage fetch error:', error);
-    if (!fallbackAttempted) {
-      console.log('Alpha Vantage error, falling back to Yahoo Finance');
-      return await fetchYahooFinance(params);
-    }
-    throw error;
-  }
-}
 
 // Helper function to fetch from Yahoo Finance
 async function fetchYahooFinance(params) {
-  console.log('Fetching from Yahoo Finance:', params);
-  const cacheKey = `yahoo_${JSON.stringify(params)}`;
-  const cached = memoryCache.get(cacheKey);
-  
-  if (cached) {
-    console.log('Returning cached Yahoo data for:', params);
-    return cached;
-  }
-
   try {
     let data;
     if (params.function === 'GLOBAL_QUOTE') {
@@ -125,7 +141,6 @@ async function fetchYahooFinance(params) {
       const previousClose = quote.regularMarketPreviousClose || 0;
       const percentChange = previousClose !== 0 ? (change / previousClose) * 100 : 0;
       
-      // Create response object with proper JSON structure
       data = {
         'Global Quote': {
           '01. symbol': String(quote.symbol || ''),
@@ -161,165 +176,137 @@ async function fetchYahooFinance(params) {
         'Time Series (Daily)': timeSeries
       };
     } else if (params.function === 'NEWS_SENTIMENT') {
-      // For news, we'll use Yahoo Finance news API
-      const symbols = params.tickers.split(',');
-      const newsPromises = symbols.map(async symbol => {
-        try {
-          // Get news articles for each symbol
-          const news = await yahooFinance.search(symbol, {
-            newsCount: 5, // Get 5 news items per symbol
-            enableNavLinks: true,
-            enableEnhancedTrivialQuery: true
-          });
-          
-          // Transform the news items to match our expected format
-          return news.news.map(item => ({
-            title: item.title,
-            url: item.link,
-            time_published: new Date(item.providerPublishTime * 1000).toISOString(),
-            summary: item.snippet,
-            source: item.publisher,
-            category: 'Market News',
-            ticker_sentiment: [{
-              ticker: symbol,
-              sentiment_score: 0 // Yahoo doesn't provide sentiment, default to neutral
-            }]
-          }));
-        } catch (error) {
-          console.error(`Error fetching news for ${symbol}:`, error);
-          return [{
-            title: `${symbol} Information`,
-            url: `https://finance.yahoo.com/quote/${symbol}`,
-            time_published: new Date().toISOString(),
-            summary: `View latest information about ${symbol} on Yahoo Finance`,
-            source: 'Yahoo Finance',
-            category: 'Stock Info'
-          }];
-        }
+      const news = await yahooFinance.search(params.tickers, {
+        newsCount: 10,
+        enableNavLinks: false,
+        enableEnhancedTrivialQuery: true
       });
-
-      // Flatten all news items and sort by date
-      const allNews = (await Promise.all(newsPromises))
-        .flat()
-        .sort((a, b) => new Date(b.time_published) - new Date(a.time_published));
-
-      // Remove duplicates based on title and keep only the most recent 20 news items
-      const feed = Array.from(
-        new Map(allNews.map(item => [item.title, item])).values()
-      ).slice(0, 20);
-
-      data = { feed };
+      
+      data = {
+        feed: news.news.map(item => ({
+          title: item.title,
+          url: item.link,
+          time_published: item.providerPublishTime * 1000, // Convert to milliseconds
+          summary: item.summary,
+          source: item.publisher,
+          category: "Market News"
+        }))
+      };
     }
 
-    if (!data) {
-      throw new Error('Failed to fetch data from Yahoo Finance');
-    }
-
-    console.log('Yahoo Finance response:', data);
-    memoryCache.set(cacheKey, data);
     return data;
   } catch (error) {
-    console.error('Yahoo Finance error:', error);
-    throw new Error(`Yahoo Finance error: ${error.message}`);
+    throw error;
+  }
+}
+
+// Error handling middleware
+const handleError = (res, error, defaultMessage) => {
+  const status = error.status || 500;
+  const message = error.message || defaultMessage;
+  res.status(status).json({ error: message });
+};
+
+// Request validation
+const validateSymbol = (symbol) => {
+  if (!symbol) throw { status: 400, message: 'Symbol parameter is required' };
+  return symbol.trim().toUpperCase();
+};
+
+// Route handlers
+async function handleGetQuote(req, res) {
+  try {
+    const symbol = validateSymbol(req.query.symbol);
+    const data = await new Promise(resolve => {
+      requestQueue.add({ function: 'GLOBAL_QUOTE', symbol }, resolve);
+    });
+    res.json(data);
+  } catch (error) {
+    handleError(res, error, 'Failed to fetch stock quote');
+  }
+}
+
+async function handleGetHistory(req, res) {
+  try {
+    const symbol = validateSymbol(req.query.symbol);
+    const data = await new Promise(resolve => {
+      requestQueue.add({ function: 'TIME_SERIES_DAILY', symbol }, resolve);
+    });
+    res.json(data);
+  } catch (error) {
+    handleError(res, error, 'Failed to fetch stock history');
+  }
+}
+
+async function handleGetNews(req, res) {
+  try {
+    const { symbols } = req.query;
+    if (!symbols) throw { status: 400, message: 'Symbols parameter is required' };
+
+    const symbolArray = symbols.split(',').filter(s => s.trim());
+    if (symbolArray.length === 0) return res.json({ feed: [] });
+
+    const data = await new Promise(resolve => {
+      requestQueue.add(
+        { function: 'NEWS_SENTIMENT', tickers: symbolArray.join(',') },
+        resolve
+      );
+    });
+
+    res.json(data);
+  } catch (error) {
+    handleError(res, error, 'Failed to fetch market news');
+  }
+}
+
+async function handleGetTrackedStocks(req, res) {
+  try {
+    const symbols = await configService.readStocksConfig();
+    res.json({ symbols });
+  } catch (error) {
+    handleError(res, error, 'Failed to get tracked stocks');
+  }
+}
+
+async function handleAddStock(req, res) {
+  try {
+    const symbol = validateSymbol(req.body.symbol);
+    
+    // Verify the stock exists
+    try {
+      await yahooFinance.quote(symbol);
+    } catch (error) {
+      throw { status: 400, message: 'Invalid stock symbol' };
+    }
+
+    const symbols = await configService.addStock(symbol);
+    res.json({ symbols });
+  } catch (error) {
+    handleError(res, error, 'Failed to add stock');
+  }
+}
+
+async function handleRemoveStock(req, res) {
+  try {
+    const symbol = validateSymbol(req.params.symbol);
+    const symbols = await configService.removeStock(symbol);
+    res.json({ symbols });
+  } catch (error) {
+    handleError(res, error, 'Failed to remove stock');
   }
 }
 
 function setupStockRoutes(app) {
   const router = express.Router();
 
-  // Stock quote endpoint
-  router.get('/quote', alphaVantageLimiter, async (req, res) => {
-    console.log('Received stock quote request:', req.query);
-    try {
-      const { symbol } = req.query;
-      if (!symbol) {
-        return res.status(400).json({ error: 'Symbol parameter is required' });
-      }
-
-      // Add request to queue and wait for result
-      const data = await new Promise((resolve, reject) => {
-        requestQueue.push({
-          params: { function: 'GLOBAL_QUOTE', symbol },
-          resolve,
-          reject
-        });
-        processQueue();
-      });
-
-      console.log('Sending stock quote response:', data);
-      res.json(data);
-    } catch (error) {
-      console.error('Stock API Error:', error);
-      const status = error.message.includes('limit') ? 429 : 500;
-      res.status(status).json({
-        error: error.message
-      });
-    }
-  });
-
-  // Stock history endpoint
-  router.get('/history', alphaVantageLimiter, async (req, res) => {
-    console.log('Received stock history request:', req.query);
-    try {
-      const { symbol } = req.query;
-      if (!symbol) {
-        return res.status(400).json({ error: 'Symbol parameter is required' });
-      }
-
-      // Add request to queue and wait for result
-      const data = await new Promise((resolve, reject) => {
-        requestQueue.push({
-          params: { function: 'TIME_SERIES_DAILY', symbol, outputsize: 'compact' },
-          resolve,
-          reject
-        });
-        processQueue();
-      });
-
-      console.log('Sending stock history response:', data);
-      res.json(data);
-    } catch (error) {
-      console.error('Stock API Error:', error);
-      const status = error.message.includes('limit') ? 429 : 500;
-      res.status(status).json({
-        error: error.message
-      });
-    }
-  });
-
-  // Market news endpoint
-  router.get('/news', alphaVantageLimiter, async (req, res) => {
-    console.log('Received market news request:', req.query);
-    try {
-      const { symbols } = req.query;
-      if (!symbols) {
-        return res.status(400).json({ error: 'Symbols parameter is required' });
-      }
-
-      // Add request to queue and wait for result
-      const data = await new Promise((resolve, reject) => {
-        requestQueue.push({
-          params: { function: 'NEWS_SENTIMENT', tickers: symbols },
-          resolve,
-          reject
-        });
-        processQueue();
-      });
-
-      console.log('Sending market news response:', data);
-      res.json(data);
-    } catch (error) {
-      console.error('Stock API Error:', error);
-      const status = error.message.includes('limit') ? 429 : 500;
-      res.status(status).json({
-        error: error.message
-      });
-    }
-  });
+  router.get('/quote', stockLimiter, handleGetQuote);
+  router.get('/history', stockLimiter, handleGetHistory);
+  router.get('/news', stockLimiter, handleGetNews);
+  router.get('/tracked', handleGetTrackedStocks);
+  router.post('/track', handleAddStock);
+  router.delete('/track/:symbol', handleRemoveStock);
 
   app.use('/api/stock', router);
-  
-  console.log('Stock routes initialized');
 }
 
 module.exports = { setupStockRoutes };

@@ -8,7 +8,7 @@ const configStr = configMatch ? configMatch[1] : '{}';
 const config = eval(`(${configStr})`);
 
 const ISS_NORAD_ID = 25544;  // NORAD ID for the ISS
-const N2YO_API_KEY = process.env.REACT_APP_N2YO_API_KEY;
+const N2YO_API_KEY = process.env.N2YO_API_KEY;
 
 // Cache for API responses
 const cache = {
@@ -40,7 +40,6 @@ const rateLimiter = {
     );
     
     if (waitTime > 0) {
-      console.log(`Rate limiting: waiting ${waitTime}ms before next request`);
       await new Promise(resolve => setTimeout(resolve, waitTime));
     }
     
@@ -50,7 +49,6 @@ const rateLimiter = {
   updateRetryAfter(seconds) {
     this.retryAfter = seconds;
     this.retryCount++;
-    console.log(`Rate limit hit, retry count: ${this.retryCount}`);
   },
   reset() {
     this.retryCount = 0;
@@ -67,25 +65,16 @@ const api = axios.create({
   }
 });
 
-// Add response interceptor for logging
+// Add response interceptor for error handling
 api.interceptors.response.use(
   response => {
-    rateLimiter.reset(); // Reset on successful response
+    rateLimiter.reset();
     return response;
   },
-  error => {
-    console.error('API Error:', {
-      status: error.response?.status,
-      statusText: error.response?.statusText,
-      url: error.config?.url,
-      message: error.response?.data?.message || error.message
-    });
-    return Promise.reject(error);
-  }
+  error => Promise.reject(error)
 );
 
 async function getLaunches(limit = 5) {
-  // Check cache
   if (cache.launches.data && Date.now() - cache.launches.timestamp < CACHE_DURATION.launches) {
     return cache.launches.data;
   }
@@ -103,19 +92,9 @@ async function getLaunches(limit = 5) {
       }
     );
 
-    // Ensure we have a results array
     const formattedData = {
       results: response.data?.results || []
     };
-
-    // Add detailed debug logging
-    console.log('Launch API response:', {
-      status: response.status,
-      statusText: response.statusText,
-      hasResults: !!response.data?.results,
-      resultsLength: response.data?.results?.length || 0,
-      firstResult: response.data?.results?.[0] || null
-    });
 
     cache.launches = {
       data: formattedData,
@@ -124,13 +103,6 @@ async function getLaunches(limit = 5) {
 
     return formattedData;
   } catch (error) {
-    console.log('Launch API error:', {
-      status: error.response?.status,
-      statusText: error.response?.statusText,
-      message: error.message,
-      data: error.response?.data
-    });
-
     if (error.response?.status === 429) {
       const formattedData = {
         results: [{
@@ -157,7 +129,6 @@ async function getLaunches(limit = 5) {
 async function getISSPasses(lat, lon, days = 5, minElevation = 10) {
   const cacheKey = `${lat},${lon}`;
   
-  // Check cache
   if (cache.issPasses?.data && Date.now() - cache.issPasses.timestamp < CACHE_DURATION.issPasses) {
     return cache.issPasses.data;
   }
@@ -167,15 +138,11 @@ async function getISSPasses(lat, lon, days = 5, minElevation = 10) {
     if (!N2YO_API_KEY) {
       throw new Error('N2YO API key not configured');
     }
-
-    console.log('Using N2YO API key:', N2YO_API_KEY ? 'Present' : 'Missing');
     
-    // N2YO API requires parameters in URL path
     const response = await api.get(
       `https://api.n2yo.com/rest/v1/satellite/visualpasses/${ISS_NORAD_ID}/${lat}/${lon}/0/${days}/${minElevation}?apiKey=${N2YO_API_KEY}`
     );
 
-    // Debug log response
     if (response.data.error) {
       throw new Error(`N2YO API error: ${response.data.error}`);
     }
@@ -184,7 +151,6 @@ async function getISSPasses(lat, lon, days = 5, minElevation = 10) {
       throw new Error('Invalid response format from N2YO API');
     }
 
-    // Transform the data to match frontend format
     const formattedPasses = response.data.passes.map(pass => ({
       type: 'iss',
       name: new Date(pass.startUTC * 1000).toLocaleString(),
@@ -212,20 +178,11 @@ async function getISSPasses(lat, lon, days = 5, minElevation = 10) {
 
     return result;
   } catch (error) {
-    console.log('N2YO API error:', {
-      status: error.response?.status,
-      statusText: error.response?.statusText,
-      message: error.message,
-      data: error.response?.data
-    });
     if (error.response?.status === 429) {
       const retryAfter = parseInt(error.response.headers['retry-after'] || '60');
       rateLimiter.updateRetryAfter(retryAfter);
-      console.log(`Rate limited, retry after ${retryAfter} seconds`);
       
-      // Return cached data if available
       if (cache.issPasses?.data) {
-        console.log('Using cached ISS pass data');
         return cache.issPasses.data;
       }
     }
@@ -250,7 +207,24 @@ function setupSpaceRoutes(app) {
   app.get('/api/space/launches', async (req, res) => {
     try {
       const limit = parseInt(req.query.limit) || 5;
+      const cacheControl = req.headers['cache-control'] || '';
+      
+      if (cacheControl.includes('only-if-cached')) {
+        if (cache.launches.data && Date.now() - cache.launches.timestamp < CACHE_DURATION.launches) {
+          res.json(cache.launches.data);
+        } else {
+          res.status(504).json({ error: 'No cached data available' });
+        }
+        return;
+      }
+
       const data = await getLaunches(limit);
+      
+      res.set({
+        'Cache-Control': `public, max-age=${CACHE_DURATION.launches / 1000}`,
+        'Last-Modified': new Date(cache.launches.timestamp).toUTCString()
+      });
+      
       res.json(data);
     } catch (error) {
       res.status(error.response?.status || 500).json({
@@ -264,12 +238,29 @@ function setupSpaceRoutes(app) {
   app.get('/api/space/iss/passes', checkLocationParams, async (req, res) => {
     try {
       const { lat, lng, days, minElevation } = req.query;
+      const cacheControl = req.headers['cache-control'] || '';
+      
+      if (cacheControl.includes('only-if-cached')) {
+        if (cache.issPasses.data && Date.now() - cache.issPasses.timestamp < CACHE_DURATION.issPasses) {
+          res.json(cache.issPasses.data);
+        } else {
+          res.status(504).json({ error: 'No cached data available' });
+        }
+        return;
+      }
+
       const data = await getISSPasses(
         parseFloat(lat),
         parseFloat(lng),
         parseInt(days) || 5,
         parseInt(minElevation) || 10
       );
+      
+      res.set({
+        'Cache-Control': `public, max-age=${CACHE_DURATION.issPasses / 1000}`,
+        'Last-Modified': new Date(cache.issPasses.timestamp).toUTCString()
+      });
+      
       res.json(data);
     } catch (error) {
       res.status(error.response?.status || 500).json({

@@ -174,13 +174,13 @@ const LeafletMap = ({ center, aircraft }) => {
   }, [aircraft, showPaths, flightPaths]);
 
   return (
-    <div className="relative w-full h-full flex">
-      <div ref={mapRef} className="flex-grow" />
+    <div className="fixed inset-0 w-screen h-screen flex flex-col md:flex-row">
+      <div ref={mapRef} className="flex-grow h-full relative" />
       {showInfo && (
-        <div className="w-96 bg-gray-800 p-4 overflow-y-auto">
-          <div className="mb-4">
-            <h3 className="text-lg font-bold mb-2 text-gray-100">Aircraft Details</h3>
-            <p className="text-sm text-gray-300">
+        <div className="w-full md:w-96 bg-gray-800/95 md:bg-gray-800 p-3 md:p-4 overflow-y-auto max-h-[50vh] md:max-h-full md:h-full">
+          <div className="mb-3 md:mb-4">
+            <h3 className="text-base md:text-lg font-bold mb-1 md:mb-2 text-gray-100">Aircraft Details</h3>
+            <p className="text-xs md:text-sm text-gray-300">
               {aircraft.length} aircraft in range
             </p>
           </div>
@@ -189,15 +189,15 @@ const LeafletMap = ({ center, aircraft }) => {
           ) : (
             <p className="text-gray-400">Select an aircraft to view details</p>
           )}
-          <div className="mt-4">
-            <h4 className="font-bold mb-2 text-gray-100">All Aircraft</h4>
-            <div className="space-y-2">
+          <div className="mt-3 md:mt-4">
+            <h4 className="text-sm md:text-base font-bold mb-2 text-gray-100">All Aircraft</h4>
+            <div className="space-y-1 md:space-y-2">
               {aircraft.map(plane => {
                 const category = getAircraftCategory(plane);
                 return (
                   <div
                     key={plane.icao24}
-                    className={`p-2 rounded cursor-pointer hover:bg-gray-700 ${
+                    className={`p-1.5 md:p-2 rounded cursor-pointer hover:bg-gray-700 ${
                       selectedAircraft?.icao24 === plane.icao24 ? 'bg-gray-700' : ''
                     }`}
                     onClick={() => setSelectedAircraft(plane)}

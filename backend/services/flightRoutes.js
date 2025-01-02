@@ -1,6 +1,38 @@
 const { getAircraftInBounds, getAircraftDetails, rateLimiter } = require('./flightService.js');
 
+let requestCount = 0;
+let lastRequestTime = Date.now();
+let dataSource = 'live';
+
 const setupFlightRoutes = (app) => {
+  // Health check endpoint
+  app.get('/api/flight/health', (req, res) => {
+    const now = Date.now();
+    const remainingRequests = rateLimiter.getRemainingRequests();
+    const isRateLimited = rateLimiter.retryAfter > 0;
+    const timeSinceLastRequest = now - rateLimiter.lastRequest;
+    const resetTime = isRateLimited ? 
+      now + (rateLimiter.retryAfter * 1000) : 
+      now + Math.max(0, rateLimiter.minInterval - timeSinceLastRequest);
+    
+    const status = {
+      status: isRateLimited ? 'rate-limited' : 'ok',
+      details: {
+        lastUpdate: lastRequestTime,
+        dataSource: dataSource,
+        requestCount: rateLimiter.requestCount,
+        rateLimited: isRateLimited,
+        rateLimit: {
+          remaining: remainingRequests,
+          total: rateLimiter.maxRequests,
+          reset: new Date(resetTime).toISOString(),
+          nextRequest: new Date(now + Math.max(0, rateLimiter.minInterval - timeSinceLastRequest)).toISOString()
+        }
+      }
+    };
+    res.json(status);
+  });
+
   // Get aircraft in bounds
   app.get('/api/flight/aircraft', async (req, res) => {
     const timeout = setTimeout(() => {
@@ -37,20 +69,17 @@ const setupFlightRoutes = (app) => {
       const aircraft = await getAircraftInBounds(bounds);
       clearTimeout(timeout);
       if (!res.headersSent) {
+        requestCount++;
+        lastRequestTime = Date.now();
+        dataSource = aircraft.length > 0 ? 'live' : 'cache';
         res.json(aircraft);
       }
     } catch (error) {
       clearTimeout(timeout);
-      console.error('Error fetching aircraft:', error.message);
-      if (error.response) {
-        console.error('Response status:', error.response.status);
-        console.error('Response data:', error.response.data);
-      }
       const status = error.response?.status || 500;
-      const errorMessage = error.response?.data?.message || error.message;
       res.status(status).json({ 
         error: 'Failed to fetch aircraft data', 
-        details: errorMessage,
+        details: error.message,
         status: status
       });
     }
@@ -72,11 +101,6 @@ const setupFlightRoutes = (app) => {
       }
     } catch (error) {
       clearTimeout(timeout);
-      console.error('Error fetching aircraft details:', error.message);
-      if (error.response) {
-        console.error('Response status:', error.response.status);
-        console.error('Response data:', error.response.data);
-      }
       res.status(500).json({ error: 'Failed to fetch aircraft details', details: error.message });
     }
   });

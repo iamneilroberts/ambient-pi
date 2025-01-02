@@ -6,12 +6,13 @@ import FinanceDashboard from './finance/FinanceDashboard';
 import FlightTracker from './flight/FlightTracker';
 import SystemMonitor from './SystemMonitor';
 import WebGLDemo from './WebGLDemo';
+import CalendarDashboard from './calendar/CalendarDashboard';
 import { config } from '../config/display-config.js';
 
 const InfoDisplayManager = () => {
   // List of currently implemented displays
   const IMPLEMENTED_DISPLAYS = useMemo(() => 
-    ['weather', 'photos', 'space', 'finance', 'flight', 'system', 'webgl'],
+    ['weather', 'photos', 'space', 'finance', 'flight', 'system', 'webgl', 'calendar'],
     []
   );
 
@@ -171,6 +172,8 @@ const InfoDisplayManager = () => {
         return <SystemMonitor />;
       case 'webgl':
         return <WebGLDemo rotationInterval={config.rotation.displays.find(d => d.id === 'webgl')?.updateInterval || 300} />;
+      case 'calendar':
+        return <CalendarDashboard />;
       default:
         // If display is not implemented yet, show photos
         // Remove this display from rotation to avoid showing unimplemented components
@@ -185,15 +188,54 @@ const InfoDisplayManager = () => {
   };
 
   return (
-    <div className="h-screen w-screen overflow-hidden">
+    <div className="h-screen w-screen overflow-hidden relative">
       {renderCurrentDisplay()}
-      {/* Debug overlay */}
-      <div className="fixed top-0 right-0 bg-black bg-opacity-50 text-white p-2 text-sm">
+      
+      {/* Mobile Navigation Bar */}
+      <div className="fixed bottom-0 left-0 right-0 bg-black bg-opacity-75 backdrop-blur-sm md:hidden z-50">
+        <div className="flex justify-around items-center p-2 gap-2">
+          {config.rotation.displays
+            .filter(d => d.enabled && IMPLEMENTED_DISPLAYS.includes(d.id))
+            .map(display => (
+              <button
+                key={display.id}
+                onClick={() => {
+                  setCurrentDisplay(display.id);
+                  const url = new URL(window.location);
+                  url.searchParams.set('display', display.id);
+                  window.history.pushState({}, '', url);
+                }}
+                className={`flex-1 py-3 px-2 rounded-lg transition-all ${
+                  currentDisplay === display.id
+                    ? 'bg-blue-500 text-white'
+                    : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
+                }`}
+              >
+                <div className="text-center">
+                  <div className="text-xs capitalize">{display.name || display.id}</div>
+                </div>
+              </button>
+            ))}
+        </div>
+        {/* Add safe area padding for mobile devices */}
+        <div className="h-safe-area-inset-bottom bg-black"></div>
+      </div>
+
+      {/* Info Overlay - Desktop only */}
+      <div className="fixed top-0 right-0 bg-black bg-opacity-50 text-white p-2 text-sm hidden md:block pointer-events-none">
         Mode: {isScreensaver ? 'Screensaver' : 'Active'}<br />
         Idle: {idleTime}s<br />
         Display: {config.rotation.displays.find(d => d.id === currentDisplay)?.name || currentDisplay}<br />
         Press Space/→ to rotate
       </div>
+
+      {/* Mobile Info Button */}
+      <button 
+        onClick={() => setIsScreensaver(prev => !prev)}
+        className="fixed top-2 right-2 bg-black bg-opacity-50 text-white p-2 rounded-full text-xs md:hidden z-40"
+      >
+        ℹ️
+      </button>
     </div>
   );
 };
